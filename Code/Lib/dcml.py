@@ -255,7 +255,7 @@ class DataClusterBasedMachineLearning:
         for prediction_alg in self.prediction_algs:
             r2 = self.ml_family.get_SL_model_r2(cl_alg, parameters, cur_cluster, prediction_alg)
 
-            print(f'Check R2 for {cl_alg}.{parameters}.{cur_cluster}.{prediction_alg} = {r2}')
+            print(f'Check for {cl_alg}.{parameters}.{cur_cluster}.{prediction_alg} = {r2}')
             r2_high = min_or_max(r2_high, r2)
             if r2 is r2_high:
                 if alg_high is not None:
@@ -458,11 +458,11 @@ class DataClusterBasedMachineLearning:
             # Replace the old with the new SL model
             sl['SL_MODEL'] = model
 
-        print('!!! An ML model family was selected !!!')
+        print('***An ML model family was selected***')
 
         return self.ml_family
 
-    def perform_prediction(self, x_test, y_test, metrics='R2'):
+    def perform_prediction(self, x_test, y_test, metrics='MAE'):
         """
         This performs prediction given a test data set
         :param x_test: test data for X variables
@@ -489,17 +489,17 @@ class DataClusterBasedMachineLearning:
 
             for cluster_id in y_label:
                 ml_name, ml_model = self.get_sl_model(cluster_id)
-                yPre, r2 = self.do_prediction(ml_name, ml_model, x_test.iloc[[index]], y_test.iloc[[index]], cbn_name = datetime.now().strftime("%m_%d_%Y %H_%M_%S"))
+                yPre, score = self.do_prediction(ml_name, ml_model, x_test.iloc[[index]], y_test.iloc[[index]], cbn_name = datetime.now().strftime("%m_%d_%Y %H_%M_%S"))
                 yPredicted.append(yPre)
                 index += 1
 
             yPredicted2 = pd.DataFrame(yPredicted)
-            r2 = self.score(y_test, yPredicted2)
+            score = self.score(y_test, yPredicted2)
         else:
             ml_name, ml_model = self.get_sl_model(0)
-            yPredicted, r2 = self.do_prediction(ml_name, ml_model, x_test, y_test, cbn_name=datetime.now().strftime("%m_%d_%Y %H_%M_%S"))
+            yPredicted, score = self.do_prediction(ml_name, ml_model, x_test, y_test, cbn_name=datetime.now().strftime("%m_%d_%Y %H_%M_%S"))
 
-        return yPredicted, r2, y_label
+        return yPredicted, score, y_label
 
     def get_cl_model(self):
         """
