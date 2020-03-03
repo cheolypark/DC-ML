@@ -3,18 +3,20 @@ import warnings
 
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn import cluster, mixture
 from sklearn.neighbors import kneighbors_graph
 from sklearn.preprocessing import StandardScaler
 from itertools import cycle, islice
+from one_dimensional_gaussian_kernel import OneDimensionalGaussianKernel
+from multi_dimensional_gaussian_kernel import MultiDimensionalGaussianKernel
+
 
 class Clustering_Alg:
-    def __init__(self, plot=False):
+    def __init__(self):
         self.datasets = []
-        self.plot = plot
         self.selected_clustering_algorithms = []
         self.clustering_algorithms = {}
+        self.clustering_variables = []
 
     def set_algs(self, algs):
         """
@@ -28,17 +30,26 @@ class Clustering_Alg:
                             'OPTICS'
                             'Birch'
                             'GaussianMixture'
+                            'OneDGaussianKernel'
         """
         self.selected_clustering_algorithms.append(algs)
 
-    def set_data(self, X_data, y_data):
-        new_data = (  # First data set
+    def set_data(self, X_data, y_data, clustering_variables):
+        # data that was assigned as clustering_variables are used for clustering
+        self.clustering_variables = clustering_variables
+
+        self.X_data_all = X_data
+
+        X_clustring_data = X_data[clustering_variables]
+        y_clustring_data = y_data
+
+        data_cl = (  # First data set
                         (  # X predictors [X1, X2]
                             # e.g., ) np.array([[10, 20], [20, 30], [11, 11], [11, 24], [25, 36], [12, 11], [30, 20]]),
-                            X_data,
+                            X_clustring_data,
                             # Y target [Y]
                             # e.g., ) np.array([1, 0, 1, 1, 1, 0, 1])
-                            y_data
+                            y_clustring_data
                         ),
                         {  # Algorithm Parameters
                             # 'damping': 0.77, 'preference': -240,
@@ -46,10 +57,18 @@ class Clustering_Alg:
                         }
                     )
 
-        self.datasets.append(new_data)
-        self.set_base()
+        self.datasets.append(data_cl)
 
-    def set_base(self, n_clusters=2):
+    def set_base(self, parameter):
+        n_clusters = 10
+        bandwidth = 0.05
+
+        if self.selected_clustering_algorithms[0] == 'OneDGaussianKernel' or \
+           self.selected_clustering_algorithms[0] == 'MultiDGaussianKernel':
+            bandwidth = parameter
+        else:
+            n_clusters = parameter
+
         self.default_base = {'quantile': .3,
                              'eps': .3,
                              'damping': .9,
@@ -58,12 +77,46 @@ class Clustering_Alg:
                              'n_clusters': n_clusters,
                              'min_samples': 10,
                              'xi': 0.05,
-                             'min_cluster_size': 0.1}
+                             'min_cluster_size': 0.1,
+                             'bandwidth':bandwidth}
 
     def get_clustering_alg(self):
         return self.clustering_algorithms[self.selected_clustering_algorithms[0]]
 
     def get_clustered_data(self, alg):
+        """
+        This returns clustered data according to a selected algorithm
+        :param alg: a selected algorithm
+        :return: clustered data
+        """
+
+        algorithm = self.clustering_algorithms[alg]
+        # print(self.datasets)
+        re_X_data = {}
+        for i_dataset, (dataset, algo_params) in enumerate(self.datasets):
+            X = dataset
+            if isinstance(X, pd.DataFrame):
+                for i in range(len(X.index)):
+                    data_id = algorithm.labels_[i]
+                    if data_id not in re_X_data:
+                        re_X_data[data_id] = X.iloc[i].transpose()
+                    else:
+                        re_X_data[data_id] = pd.concat((re_X_data[data_id], X.iloc[i]), axis=1)
+
+                for key in re_X_data:
+                    re_X_data[key] = re_X_data[key].transpose()
+
+            elif not isinstance(X, pd.DataFrame):
+                for i in range(len(X)):
+                    data_id = algorithm.labels_[i]
+                    if data_id not in re_X_data:
+                        re_X_data[data_id] = np.array([X[i]])
+                    else:
+                        re_X_data[data_id] = np.concatenate((re_X_data[data_id], [X[i]]), axis=0)
+
+            return re_X_data
+
+    def get_clustered_data_XY(self, alg):
         """
         This returns clustered data according to a selected algorithm
         :param alg: a selected algorithm
@@ -81,11 +134,11 @@ class Clustering_Alg:
                 for i in range(len(X.index)):
                     data_id = algorithm.labels_[i]
                     if data_id not in re_X_data:
-                        re_X_data[data_id] = X.iloc[i].transpose()
+                        re_X_data[data_id] = self.X_data_all.iloc[i].transpose()
                         re_y_data[data_id] = y.iloc[i]
-                        re_data[data_id] = pd.concat([X.iloc[i], y.iloc[i]], axis=0)
+                        re_data[data_id] = pd.concat([self.X_data_all.iloc[i], y.iloc[i]], axis=0)
                     else:
-                        re_X_data[data_id] = pd.concat((re_X_data[data_id], X.iloc[i]), axis=1)
+                        re_X_data[data_id] = pd.concat((re_X_data[data_id], self.X_data_all.iloc[i]), axis=1)
                         re_y_data[data_id] = pd.concat((re_y_data[data_id], y.iloc[i]), axis=1)
                         re_data[data_id] = pd.concat((re_X_data[data_id], re_y_data[data_id]), axis=0)
 
@@ -98,22 +151,18 @@ class Clustering_Alg:
                 for i in range(len(X)):
                     data_id = algorithm.labels_[i]
                     if data_id not in re_X_data:
-                        re_X_data[data_id] = np.array([X[i]])
+                        re_X_data[data_id] = np.array([self.X_data_all[i]])
                         re_y_data[data_id] = np.array([y[i]])
                         re_data[data_id] = np.concatenate((re_X_data[data_id], re_y_data[data_id]), axis=1)
                     else:
-                        re_X_data[data_id] = np.concatenate((re_X_data[data_id], [X[i]]), axis=0)
+                        re_X_data[data_id] = np.concatenate((re_X_data[data_id], [self.X_data_all[i]]), axis=0)
                         re_y_data[data_id] = np.concatenate((re_y_data[data_id], [y[i]]), axis=0)
                         re_data[data_id] = np.concatenate((re_X_data[data_id], re_y_data[data_id]), axis=1)
 
             return re_data, re_X_data, re_y_data
 
     def run(self):
-        if self.plot:
-            plt.figure(figsize=(9 * 2 + 3, len(self.datasets)*2))
-            # plt.subplots_adjust(left=.02, right=.98, bottom=.001, top=.96, wspace=.05, hspace=.01)
 
-        plot_num = 1
         for i_dataset, (dataset, algo_params) in enumerate(self.datasets):
             # update parameters with dataset-specific values
             params = self.default_base.copy()
@@ -157,6 +206,11 @@ class Clustering_Alg:
                     self.clustering_algorithms['Birch'] = cluster.Birch(n_clusters=params['n_clusters'])
                 elif alg is 'GaussianMixture':
                     self.clustering_algorithms['GaussianMixture'] = mixture.GaussianMixture(n_components=params['n_clusters'], covariance_type='full')
+                elif alg is 'OneDGaussianKernel':
+                    self.clustering_algorithms['OneDGaussianKernel'] = OneDimensionalGaussianKernel(bandwidth=params['bandwidth'])
+                elif alg is 'MultiDGaussianKernel':
+                    self.clustering_algorithms['MultiDGaussianKernel'] = MultiDimensionalGaussianKernel(bandwidth=params['bandwidth'])
+
 
             # self.clustering_algorithms['MiniBatchKMeans'] = cluster.MiniBatchKMeans(n_clusters=params['n_clusters'])
             # self.clustering_algorithms['AffinityPropagation'] = cluster.AffinityPropagation(damping=params['damping'], preference=params['preference'])
@@ -194,32 +248,6 @@ class Clustering_Alg:
                     y_pred = algorithm.predict(X)
                     algorithm.labels_ = y_pred
 
-                ################################################################
-                # plot clusters
-                if self.plot:
-                    plt.subplot(len(self.datasets), len(self.clustering_algorithms), plot_num)
-                    if i_dataset == 0:
-                        plt.title(name, size=9)
-
-                    colors = np.array(list(islice(cycle(['#377eb8', '#ff7f00', '#4daf4a',
-                                                         '#f781bf', '#a65628', '#984ea3',
-                                                         '#999999', '#e41a1c', '#dede00']),
-                                                  int(max(y_pred) + 1))))
-                    # add black color for outliers (if any)
-                    colors = np.append(colors, ["#000000"])
-                    plt.scatter(X[:, 0], X[:, 1], s=10, color=colors[y_pred])
-
-                    plt.xlim(-2.5, 2.5)
-                    plt.ylim(-2.5, 2.5)
-                    plt.xticks(())
-                    plt.yticks(())
-                    plt.text(.99, .01, ('%.2fs' % (t1 - t0)).lstrip('0'),
-                             transform=plt.gca().transAxes, size=8,
-                             horizontalalignment='right')
-                    plot_num += 1
-
-        if self.plot:
-            plt.show()
 
 
 # # Test code

@@ -1,4 +1,3 @@
-import numpy as np
 from regressionML import RegressionML
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -8,83 +7,238 @@ from statistics import mean
 import math
 import warnings
 from sklearn.metrics import r2_score
+from sklearn.metrics import mean_absolute_error
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import KFold
+from datetime import datetime
+
+class MLModelFamily:
+    """
+    This class is used as a structure of machine learning family
+    """
+
+    def __init__(self, id=0):
+        self.id = id
+        self.models = {}
+        self.models = {}
+        self.data = {}
+
+    def add_CL(self, cl_alg):
+        self.models[cl_alg] = {}
+        self.data[cl_alg] = {}
+
+    def get_CL(self):
+        return self.models
+
+    def del_CL(self, cl_alg):
+        del self.models[cl_alg]
+        del self.data[cl_alg]
+
+    def add_CL_param(self, cl_alg, parameters):
+        self.models[cl_alg][parameters] = {}
+        self.data[cl_alg][parameters] = {}
+
+    def del_CL_param(self, cl_alg, parameters):
+        del self.models[cl_alg][parameters]
+        del self.data[cl_alg][parameters]
+
+    def add_CL_model(self, cl_alg, parameters, cl):
+        if 'CL_MODEL' not in self.models[cl_alg][parameters]:
+            self.models[cl_alg][parameters]['CL_MODEL'] = {}
+
+        self.models[cl_alg][parameters]['CL_MODEL'] = cl
+
+    def set_CL_model_avg_r2(self, cl_alg, parameters, avg_r2):
+        self.models[cl_alg][parameters]['AVG_R2'] = avg_r2
+
+    def get_CL_model_avg_r2(self, cl_alg, parameters):
+        return self.models[cl_alg][parameters]['AVG_R2']
+
+    def set_CL_total_avg_r2(self, cl_alg, avg_r2):
+        self.models[cl_alg]['TOTAL_AVG_R2'] = avg_r2
+
+    def get_CL_total_avg_r2(self, cl_alg):
+        return self.models[cl_alg]['TOTAL_AVG_R2']
+
+    def set_CL_data(self, cl_alg, parameters, cur_cluster, data_name, data):
+        if cur_cluster not in self.data[cl_alg][parameters]:
+            self.data[cl_alg][parameters][cur_cluster] = {}
+        self.data[cl_alg][parameters][cur_cluster][data_name] = data
+
+    def add_SL(self, cl_alg, parameters, cur_cluster, prediction_alg):
+        if cur_cluster not in self.models[cl_alg][parameters]:
+            self.models[cl_alg][parameters][cur_cluster] = {}
+
+        self.models[cl_alg][parameters][cur_cluster][prediction_alg] = {}
+
+    def del_SL(self, cl_alg, parameters, cur_cluster, prediction_alg):
+        del self.models[cl_alg][parameters][cur_cluster][prediction_alg]
+
+    def add_SL_model(self, cl_alg, parameters, cur_cluster, prediction_alg, model):
+        self.models[cl_alg][parameters][cur_cluster][prediction_alg]['SL_MODEL'] = model
+
+    def set_SL_model_r2(self, cl_alg, parameters, cur_cluster, prediction_alg, r2):
+        if math.isnan(r2):
+            # In some cases, the training data has the size of 1, then R2 becomes NaN.
+            warnings.warn(f'{cl_alg}.{parameters}.{cur_cluster}.{prediction_alg}: The prediction result was NaN.')
+            self.models[cl_alg][parameters][cur_cluster][prediction_alg]['R2'] = -10
+        else:
+            self.models[cl_alg][parameters][cur_cluster][prediction_alg]['R2'] = r2
+
+    def get_SL_model_r2(self, cl_alg, parameters, cur_cluster, prediction_alg):
+        return self.models[cl_alg][parameters][cur_cluster][prediction_alg]['R2']
+
+    def get_CL_models(self, cl_alg, parameters):
+        cl_models = {}
+        for key, value in self.models[cl_alg][parameters].items():
+            if key is not 'CL_MODEL' and key is not 'AVG_R2':
+                cl_models[key] = value
+
+        return cl_models
+
+    def set_high_CL_model(self, cl_alg, alg_high):
+        self.models[cl_alg]['HIGH_CL'] = alg_high
+
+    def get_high_CL_model(self, cl_alg):
+        return self.models[cl_alg]['HIGH_CL']
 
 
 class DataClusterBasedMachineLearning:
     """
-    Data Cluster based Machine Learning
+    Data Cluster based Machine Learning (DC-ML)
     """
-    def __init__(self, data_x,  data_y, clustering_algs, prediction_algs, max_clusters):
+
+    def __init__(self, data_x, data_y, clustering_variables, clustering_algs, prediction_algs, metrics='MAE'):
         """
         :param data: A training data set D
         :param clustering_alg: A set of clustering algorithms C
         :param prediction_alg: A set of prediction algorithms P
-        :param max_clusterss: A maximum number of clusters m
+        :param max_clusters: A maximum number of clusters m
         """
         self.data_x = data_x
         self.data_y = data_y
+        self.clustering_variables = clustering_variables
         self.clustering_algs = clustering_algs
         self.prediction_algs = prediction_algs
-        self.max_clusters = max_clusters
 
-        self.ml_models = {}
-        self.high_scored_dcml_model = None
+        # Initialize an ML Model Family
+        # It contains all ML models (i.e., Clustering Models (CL) and their Supervised Learning (SL) Models)
+        self.ml_family = MLModelFamily()
 
         # For experiment
-        self.ml_data = {}
         self.is_experiment = True
+        self.set_metrics(metrics)
 
-    def do_machine_learning(self, cbn_name, prediction_alg, x_train, y_train):
-        if prediction_alg is 'GradientBoosting':
-            model = RegressionML().GradientBoostingRegressor_ML(x_train, y_train)
-        elif prediction_alg is 'RandomForest':
-            model = RegressionML().RandomForestRegressor_ML(x_train, y_train)
-        elif prediction_alg is 'GaussianProcess':
-            model = RegressionML().GaussianProcessRegressor_ML(x_train, y_train)
-        elif prediction_alg is 'ContinuousBN':
-            model = RegressionML().ContinuousBNRegressor_ML(cbn_name, x_train, y_train)
+    def set_metrics(self, metrics):
+        # Set metrics
+        self.metrics = metrics
+        if metrics == 'R2':
+            self.score = r2_score
+        elif metrics == 'MAE':
+            self.score = mean_absolute_error
+
+    def min_or_max(self):
+        if self.metrics == 'R2':
+            return max, float('-inf')
+        elif self.metrics == 'MAE':
+            return min, float('inf')
+
+    def do_machine_learning(self, prediction_alg, x_train, y_train, cbn_name='temp'):
+        """
+        This performs common SL learning
+        :param prediction_alg: A name of SL learning
+        :param x_train: Training data for X variables
+        :param y_train: Training data for a y variable
+        :param cbn_name: A special parameter for continuous BN learning
+        :return: A SL learning object
+        """
+
+        if prediction_alg is 'GradientBoostingRegressor':
+            model = RegressionML(self.metrics).GradientBoostingRegressor_ML(x_train, y_train)
+        elif prediction_alg is 'RandomForestRegressor':
+            model = RegressionML(self.metrics).RandomForestRegressor_ML(x_train, y_train)
+        elif prediction_alg is 'GaussianProcessRegressor':
+            model = RegressionML(self.metrics).GaussianProcessRegressor_ML(x_train, y_train)
+        elif prediction_alg is 'LinearRegression':
+            model = RegressionML(self.metrics).LinearRegressor_ML(x_train, y_train)
+        elif prediction_alg is 'ContinuousBNRegressor':
+            model = RegressionML(self.metrics).ContinuousBNRegressor_ML(cbn_name, x_train, y_train)
         return model
 
-    def do_prediction(self, cbn_name, prediction_alg, model, x_test, y_test=None):
-        if prediction_alg is 'GradientBoosting':
-            yPredicted, r2 = RegressionML().prediction(model, x_test, y_test)
-        elif prediction_alg is 'RandomForest':
-            yPredicted, r2 = RegressionML().prediction(model, x_test, y_test)
-        elif prediction_alg is 'GaussianProcess':
-            yPredicted, r2 = RegressionML().prediction(model, x_test, y_test)
-        elif prediction_alg is 'ContinuousBN':
-            yPredicted, r2 = RegressionML().ContinuousBNRegressor_prediction(cbn_name, model, x_test, y_test)
+    def do_prediction(self, model_name, model, X, y=None, cbn_name='temp'):
+        """
+        This performs prediction using a given SL learning
+        :param model_name: A name of SL learning
+        :param model: An object of SL learning
+        :param X: Data for X variables
+        :param y: Data for a y variable
+        :param cbn_name: A special parameter for continuous BN learning
+        :return:
+        """
+
+        if model_name is 'ContinuousBNRegressor':
+            yPredicted, r2 = RegressionML(self.metrics).ContinuousBNRegressor_prediction(cbn_name, model, X, y)
+        else:
+            yPredicted, r2 = RegressionML(self.metrics).prediction(model, X, y)
         return yPredicted, r2
 
-    def perform_machine_learning_alg(self, cl_alg, num_clusters, cur_cluster, prediction_alg, x_train, x_test, y_train, y_test):
+    def perform_machine_learning_alg(self, cl_alg, parameters, cur_cluster, prediction_alg, x_clustered, y_clustered):
+        """
+        This performs an SL algorithm
+        :param cl_alg: The name of a clustering algorithm
+        :param parameters:
+        :param cur_cluster: The current cluster index of the clustering algorithm
+        :param prediction_alg: A name of SL learning
+        :param x_train: Training data for X variables
+        :param x_val: Validation data for X variables
+        :param y_train: Training data for a y variable
+        :param y_val: Validation data for a y variable
+        """
+
         # temporary name for CBN
-        cbn_name = f'{cl_alg}_{num_clusters}_{cur_cluster}'
+        cbn_name = f'{cl_alg}_{parameters}_{cur_cluster}_{datetime.now().strftime("%m_%d_%Y %H_%M_%S")}'
+        n_splits = 2
+        kf = KFold(n_splits=n_splits)
 
-        # perform ML
-        model = self.do_machine_learning(cbn_name, prediction_alg, x_train, y_train)
+        r2_avg = 0
+        for train_index, val_index in kf.split(x_clustered):
+            x_train, x_val = x_clustered.iloc[train_index], x_clustered.iloc[val_index]
+            y_train, y_val = y_clustered.iloc[train_index], y_clustered.iloc[val_index]
 
-        # perform prediction
-        yPredicted, r2 = self.do_prediction(cbn_name, prediction_alg, model, x_test, y_test)
+            # perform ML
+            model = self.do_machine_learning(prediction_alg, x_train, y_train, cbn_name=cbn_name)
 
-        # print(cl_alg, num_clusters, cur_cluster, prediction_alg, yPredicted, r2)
+            # perform prediction
+            yPredicted, r2 = self.do_prediction(prediction_alg, model, x_val, y_val, cbn_name=cbn_name)
+            r2_avg += r2
 
-        # store results
-        if math.isnan(r2):
-            # In some cases, the training data has the size of 1, then R2 becomes NaN.
-            warnings.warn(f'{cl_alg}.{num_clusters}.{cur_cluster}.{prediction_alg}: The prediction result was NaN.')
-            self.ml_models[cl_alg][num_clusters][cur_cluster][prediction_alg]['R2'] = -10
-        else:
-            self.ml_models[cl_alg][num_clusters][cur_cluster][prediction_alg]['R2'] = r2
+        r2_avg = r2_avg/n_splits
+        # print(cbn_name, prediction_alg, model.feature_importances_)
 
-        self.ml_models[cl_alg][num_clusters][cur_cluster][prediction_alg]['ML_MODEL'] = model
+        self.ml_family.add_SL_model(cl_alg, parameters, cur_cluster, prediction_alg, model)
+        self.ml_family.set_SL_model_r2(cl_alg, parameters, cur_cluster, prediction_alg, r2_avg)
 
-    def perform_machine_learning(self, cl_alg, num_clusters, cur_cluster, x_train, x_test, y_train, y_test):
+    def perform_machine_learning(self, cl_alg, parameters, cur_cluster, x_clustered, y_clustered):
+        """
+        This executes a set of SL algorithms
+        :param cl_alg: The name of a clustering algorithm
+        :param parameters:
+        :param cur_cluster: The current cluster index of the clustering algorithm
+        :param x_train: Training data for X variables
+        :param x_val: Validation data for X variables
+        :param y_train: Training data for a y variable
+        :param y_val: Validation data for a y variable
+        """
 
+        #############################################################################
+        # 1. perform common machine learning
         thread = []
         for prediction_alg in self.prediction_algs:
-            self.ml_models[cl_alg][num_clusters][cur_cluster][prediction_alg] = {}
-            print(f'[Thread] {cl_alg}.{num_clusters}.{cur_cluster} -> ML alg {prediction_alg}')
-            t = threading.Thread(target=self.perform_machine_learning_alg, args=([cl_alg, num_clusters, cur_cluster, prediction_alg, x_train, x_test, y_train, y_test]))
+            self.ml_family.add_SL(cl_alg, parameters, cur_cluster, prediction_alg)
+
+            print(f'[Thread] {cl_alg}.{parameters}.{cur_cluster} -> ML alg {prediction_alg}')
+
+            t = threading.Thread(target=self.perform_machine_learning_alg, args=([cl_alg, parameters, cur_cluster, prediction_alg, x_clustered, y_clustered]))
             t.setDaemon(True)
             thread.append(t)
 
@@ -94,63 +248,75 @@ class DataClusterBasedMachineLearning:
         for t in thread:
             t.join()
 
-        # select a best prediction alg and remove all low-scored algorithms
+        #############################################################################
+        # 2.Select a best prediction alg and remove all low-scored algorithms
         alg_high = None
-        r2_high = -10000
+        min_or_max, r2_high = self.min_or_max()
         for prediction_alg in self.prediction_algs:
-            print(f'Check R2 for {cl_alg}.{num_clusters}.{cur_cluster}.{prediction_alg}')
-            r2 = self.ml_models[cl_alg][num_clusters][cur_cluster][prediction_alg]['R2']
-            print(f'R2 {cl_alg}.{num_clusters}.{cur_cluster}.{prediction_alg} = {r2}')
-            r2_high = max(r2_high, r2)
+            r2 = self.ml_family.get_SL_model_r2(cl_alg, parameters, cur_cluster, prediction_alg)
+
+            print(f'Check R2 for {cl_alg}.{parameters}.{cur_cluster}.{prediction_alg} = {r2}')
+            r2_high = min_or_max(r2_high, r2)
             if r2 is r2_high:
                 if alg_high is not None:
-                    del self.ml_models[cl_alg][num_clusters][cur_cluster][alg_high]
+                    self.ml_family.del_SL(cl_alg, parameters, cur_cluster, alg_high)
                 alg_high = prediction_alg
             else:
-                del self.ml_models[cl_alg][num_clusters][cur_cluster][prediction_alg]
+                self.ml_family.del_SL(cl_alg, parameters, cur_cluster, prediction_alg)
 
-    def perform_clustering_alg_with_clusters(self, cl_alg, num_clusters):
-        print(f'perform_prediction_alg {cl_alg} with the cluster {num_clusters}')
+    def perform_clustering_alg_with_clusters(self, cl_alg, parameters):
+        """
+        This performs a clustering algorithm using a given maximum number of clusters
+        :param cl_alg: A clustering algorithm
+        :param parameters:
+        """
 
+        #############################################################################
+        # 1. Perform clustering algorithm using input training data
+        print(f'perform_prediction_alg {cl_alg} with the cluster {parameters}')
         cl = Clustering_Alg()
         cl.set_algs(cl_alg)
-        cl.set_base(n_clusters=num_clusters)
-        cl.set_data(self.data_x, self.data_y)
+        cl.set_base(parameters)
+        cl.set_data(self.data_x, self.data_y, self.clustering_variables)
         cl.run()
 
         # Note that the clustering algorithm can change the number of clusters
         # e.g., ) The default n_clusters = 3 changes to n_clusters = 2 according to the clustering result
+        self.ml_family.add_CL_model(cl_alg, parameters, cl)
 
-        self.ml_models[cl_alg]['CL_MODEL'] = cl
+        # Get clustered data from the cluster model
+        data, data_x, data_y = cl.get_clustered_data_XY(cl_alg)
 
-        data, data_x, data_y = cl.get_clustered_data(cl_alg)
+        #############################################################################
+        # 2. Check cluster consistency:
+        # If a cluster contains only one datum, data grouped by the cluster is determined as inconsistent data
+        # Then, return it with a lowest score
+        for cur_cluster, datum in data_x.items():
+            if len(data_y[cur_cluster]) == 1:
+                print(len(data_y[cur_cluster]))
+            print(f'data split for {cl_alg}.{parameters}.{cur_cluster} X-Size[{len(data_x[cur_cluster])}] Y-Size[{len(data_y[cur_cluster])}]')
 
+            # inconsistent clustered data!
+            if len(data_x[cur_cluster]) != len(data_y[cur_cluster]):
+                warnings.warn('inconsistent clustered data!')
+                self.ml_family.set_CL_model_avg_r2(cl_alg, parameters, -10000)
+                return
+
+        #############################################################################
+        # 3. Preparing SL learning
         thread = []
-        test_size = 0.2
 
         for cur_cluster, datum in data_x.items():
-
-            self.ml_models[cl_alg][num_clusters][cur_cluster] = {}
-            print(f'data split for {cl_alg}.{num_clusters}.{cur_cluster}')
-
             # split data for machine learning
-            x_train, x_test, y_train, y_test = train_test_split(data_x[cur_cluster], data_y[cur_cluster], test_size=test_size)
+            # x_train, x_val, y_train, y_val = train_test_split(data_x[cur_cluster], data_y[cur_cluster], test_size=test_size)
 
             if self.is_experiment:
+                # print(f'sub-training data size[{len(y_train)}], validation data size[{len(y_val)}]')
 
-                if cl_alg not in self.ml_data:
-                    self.ml_data[cl_alg] = {}
-                if num_clusters not in self.ml_data[cl_alg]:
-                    self.ml_data[cl_alg][num_clusters] = {}
-                if cur_cluster not in self.ml_data[cl_alg][num_clusters]:
-                    self.ml_data[cl_alg][num_clusters][cur_cluster] = {}
+                self.ml_family.set_CL_data(cl_alg, parameters, cur_cluster, 'x_train', data_x[cur_cluster])
+                self.ml_family.set_CL_data(cl_alg, parameters, cur_cluster, 'y_train', data_y[cur_cluster])
 
-                self.ml_data[cl_alg][num_clusters][cur_cluster]['x_train'] = x_train
-                self.ml_data[cl_alg][num_clusters][cur_cluster]['x_test'] = x_test
-                self.ml_data[cl_alg][num_clusters][cur_cluster]['y_train'] = y_train
-                self.ml_data[cl_alg][num_clusters][cur_cluster]['y_test'] = y_test
-
-            t = threading.Thread(target=self.perform_machine_learning, args=([cl_alg, num_clusters, cur_cluster, x_train, x_test, y_train, y_test]))
+            t = threading.Thread(target=self.perform_machine_learning, args=([cl_alg, parameters, cur_cluster, data_x[cur_cluster], data_y[cur_cluster]]))
             t.setDaemon(True)
             thread.append(t)
 
@@ -160,23 +326,35 @@ class DataClusterBasedMachineLearning:
         for t in thread:
             t.join()
 
-        # calculate the average R2 and store it to 'ml_models.cl_alg.num_clusters.avg_r2'
+        #############################################################################
+        # 4. Calculate the average R2 and store it to 'ml_models.cl_alg.parameters.avg_r2'
         avg_r2 = []
-        for cur_cluster, ml_alg_r2 in self.ml_models[cl_alg][num_clusters].items():
+        cl_models = self.ml_family.get_CL_models(cl_alg, parameters)
+
+        for cur_cluster, ml_alg_r2 in cl_models.items():
             try:
                 r2 = list(ml_alg_r2.values())[0]['R2']
             except IndexError:
                 print('list index out of range')
             avg_r2.append(r2)
 
-        self.ml_models[cl_alg][num_clusters]['avg_r2'] = mean(avg_r2)
+        mean_avg_r2 = mean(avg_r2)
+        self.ml_family.set_CL_model_avg_r2(cl_alg, parameters, mean_avg_r2)
 
     def perform_clustering(self, cl_alg):
+        """
+        This performs clustering
+        :param cl_alg: A clustering algorithm
+        """
+
+        #############################################################################
+        # 1. Perform clustering
         thread = []
-        for num_clusters in range(2, self.max_clusters + 1):
-            self.ml_models[cl_alg][num_clusters] = {}
-            print(f'[Thread] clustering alg {cl_alg} with the cluster number {num_clusters} start')
-            t = threading.Thread(target=self.perform_clustering_alg_with_clusters, args=([cl_alg, num_clusters]))
+        # for parameters in range(2, self.max_clusters + 1):
+        for parameters in self.clustering_algs[cl_alg]:
+            self.ml_family.add_CL_param(cl_alg, parameters)
+            print(f'[Thread] clustering alg {cl_alg} with the cluster parameter {parameters} start')
+            t = threading.Thread(target=self.perform_clustering_alg_with_clusters, args=([cl_alg, parameters]))
             t.setDaemon(True)
             thread.append(t)
 
@@ -186,29 +364,37 @@ class DataClusterBasedMachineLearning:
         for t in thread:
             t.join()
 
-        # select a best number of clusters and remove all low-scored models
+        #############################################################################
+        # 2. select a best number of clusters and remove all low-scored models
         cl_num_high = None
-        avg_r2_high = -10000
-        # keys = list(self.ml_models[cl_alg].keys())
-        # for num_clusters in keys:
-        for num_clusters in range(2, self.max_clusters + 1):
-            avg_r2 = self.ml_models[cl_alg][num_clusters]['avg_r2']
-            avg_r2_high = max(avg_r2_high, avg_r2)
+        min_or_max, avg_r2_high = self.min_or_max()
+
+        # for parameters in range(2, self.max_clusters + 1):
+        for parameters in self.clustering_algs[cl_alg]:
+            avg_r2 = self.ml_family.get_CL_model_avg_r2(cl_alg, parameters)
+
+            print(f'Check avg_r2 for {cl_alg}.{parameters} = {avg_r2}')
+            avg_r2_high = min_or_max(avg_r2_high, avg_r2)
             if avg_r2 is avg_r2_high:
                 if cl_num_high is not None:
-                    del self.ml_models[cl_alg][cl_num_high]
-                    del self.ml_data[cl_alg][cl_num_high]
-                cl_num_high = num_clusters
+                    self.ml_family.del_CL_param(cl_alg, cl_num_high)
+                cl_num_high = parameters
             else:
-                del self.ml_models[cl_alg][num_clusters]
-                del self.ml_data[cl_alg][num_clusters]
+                self.ml_family.del_CL_param(cl_alg, parameters)
 
-        self.ml_models[cl_alg]['avg_r2'] = avg_r2_high
+        self.ml_family.set_CL_total_avg_r2(cl_alg, avg_r2_high)
 
     def run(self):
+        """
+        This is a main function for running DC-ML learning
+        :return: An ML model family object
+        """
+
+        #############################################################################
+        # 1. Perform clustering
         thread = []
         for cl_alg in self.clustering_algs:
-            self.ml_models[cl_alg] = {}
+            self.ml_family.add_CL(cl_alg)
             print(f'[Thread] {cl_alg} start')
             t = threading.Thread(target=self.perform_clustering, args=([cl_alg]))
             t.setDaemon(True)
@@ -220,73 +406,166 @@ class DataClusterBasedMachineLearning:
         for t in thread:
             t.join()
 
-        # select a high-scored model
-        avg_r2_high = -10000
-        for cl_alg in self.clustering_algs:
-            avg_r2 = self.ml_models[cl_alg]['avg_r2']
-            avg_r2_high = max(avg_r2_high, avg_r2)
+        #############################################################################
+        # 2. perform ML for non-cluster models
+        # 'NON-CLUSTER' is used for machine learning of SL models without clustering
+        # self.ml_family.add_CL('NON-CLUSTER')
+        # self.ml_family.add_CL_param('NON-CLUSTER', 1)
+        # self.ml_family.add_CL_model('NON-CLUSTER', 1, 0)
+        # self.ml_family.set_CL_data('NON-CLUSTER', 1, 0, 'x_train', self.data_x)
+        # self.ml_family.set_CL_data('NON-CLUSTER', 1, 0, 'y_train', self.data_y)
+        # self.perform_machine_learning('NON-CLUSTER', 1, 0, self.data_x, self.data_y)
+        # cl_models = self.ml_family.get_CL_models('NON-CLUSTER', 1)
+        # for cur_cluster, ml_alg_r2 in cl_models.items():
+        #     r2 = list(ml_alg_r2.values())[0]['R2']
+        # self.ml_family.set_CL_total_avg_r2('NON-CLUSTER', r2)
+
+        #############################################################################
+        # 3. select a high-scored model
+        min_or_max, avg_r2_high = self.min_or_max()
+        high_scored_cl = None
+        cl_algs = list(self.ml_family.get_CL().keys())
+        for cl_alg in cl_algs:
+            avg_r2 = self.ml_family.get_CL_total_avg_r2(cl_alg)
+            avg_r2_high = min_or_max(avg_r2_high, avg_r2)
             if avg_r2 is avg_r2_high:
-                # if cl_high is not None:
-                #     del self.ml_models[cl_high]
-                self.high_scored_dcml_model = cl_alg
+                if high_scored_cl is not None:
+                    self.ml_family.del_CL(high_scored_cl)
+
+                high_scored_cl = cl_alg
             else:
-                pass
-                # del self.ml_models[cl_alg]
+                self.ml_family.del_CL(cl_alg)
 
-        print('Learned DC-ML Model:')
-        for ml in self.ml_models:
-            print(ml, self.ml_models[ml]['avg_r2'])
+        #############################################################################
+        # 4. perform ML **again** using all data of both training and validation data sets
+        sl_models = self.get_sl_models()
+        for cluster_id, sl in sl_models.items():
+            # print(cluster_id, sl)
+            x_train, y_train = self.get_clustered_data_by_id(cluster_id)
+            # self.data[cl_alg][parameters]
 
-        print('High-Scored DC-ML Model:', self.high_scored_dcml_model)
+            # temporary name for CBN
+            cbn_name = f'{cl_alg}_{cluster_id}_{datetime.now().strftime("%m_%d_%Y %H_%M_%S")}'
 
-        return self.ml_models[self.high_scored_dcml_model]
+            if isinstance(sl['SL_MODEL'], str):
+                sl_name = 'ContinuousBNRegressor'
+            else:
+                sl_name = type(sl['SL_MODEL']).__name__
 
-    def perform_prediction(self, ml_family, x_test, y_test):
-        # cl = Clustering_Alg()
-        # data, data_x, data_y = cl.get_clustered_data(cl_alg)
-        cl_model = ml_family['CL_MODEL']
-        cl_alg = cl_model.get_clustering_alg()
-        y_label = cl_alg.fit_predict(x_test)
+            # perform ML
+            model = self.do_machine_learning(sl_name, x_train, y_train, cbn_name=cbn_name)
 
-        index = 0
-        yPredicted = []
+            # Replace the old with the new SL model
+            sl['SL_MODEL'] = model
 
-        for ml in y_label:
-            ml_models = list(ml_family.values())[0][ml]
-            ml_name = list(ml_models.keys())[0]
-            ml_model = list(ml_models.values())[0]['ML_MODEL']
+        print('!!! An ML model family was selected !!!')
 
-            # perform prediction
-            yPre, r2 = self.do_prediction('Temp', ml_name, ml_model, x_test.iloc[[index]])
-            yPredicted.append(yPre)
-            print(f'{ml_name} predicted {yPre}.')
-            index += 1
+        return self.ml_family
 
-        yPredicted = pd.DataFrame(yPredicted)
-        r2 = r2_score(y_test, yPredicted)
-        return yPredicted, r2
+    def perform_prediction(self, x_test, y_test, metrics='R2'):
+        """
+        This performs prediction given a test data set
+        :param x_test: test data for X variables
+        :param y_test: test data for a y variable
+        :return: predicted y values, R2 scores
+        """
 
-    ##########################################################
-    # Get Result Information
-    def get_high_scored_clustered_data(self):
-        _, v = next(iter(self.ml_data.items()))
-        _, clusters = next(iter(v.items()))
-        return clusters
+        self.set_metrics(metrics)
 
-    def get_high_scored_cl_model(self):
-        return self.high_scored_dcml_model
+        cl_model = self.get_cl_model()
+        y_label = []
 
-    def get_high_scored_ml_models(self):
-        _, v = next(iter(self.ml_models.items()))
-        _, clusters = next(iter(v.items()))
+        # None-cl_model means that the Non-Cluster model was selected
+        if cl_model is not None:
+            # Get data using clustering variables
+            data_for_clustering = x_test[self.clustering_variables]
+
+            # normalize dataset for easier parameter selection
+            x_test_norm = StandardScaler().fit_transform(data_for_clustering)
+            y_label = cl_model.predict(x_test_norm)
+
+            index = 0
+            yPredicted = []
+
+            for cluster_id in y_label:
+                ml_name, ml_model = self.get_sl_model(cluster_id)
+                yPre, r2 = self.do_prediction(ml_name, ml_model, x_test.iloc[[index]], y_test.iloc[[index]], cbn_name = datetime.now().strftime("%m_%d_%Y %H_%M_%S"))
+                yPredicted.append(yPre)
+                index += 1
+
+            yPredicted2 = pd.DataFrame(yPredicted)
+            r2 = self.score(y_test, yPredicted2)
+        else:
+            ml_name, ml_model = self.get_sl_model(0)
+            yPredicted, r2 = self.do_prediction(ml_name, ml_model, x_test, y_test, cbn_name=datetime.now().strftime("%m_%d_%Y %H_%M_%S"))
+
+        return yPredicted, r2, y_label
+
+    def get_cl_model(self):
+        """
+        This returns a selected clustering model
+        :return: a selected clustering model object
+        """
+
+        cl = next(iter(self.ml_family.models.values()))
+        cl_model = next(iter(cl.values()))
+        if isinstance(cl_model['CL_MODEL'], Clustering_Alg):
+            return cl_model['CL_MODEL'].get_clustering_alg()
+        else:
+            return None
+
+    def get_sl_model(self, cluster_id):
+        """
+        This returns a selected supervised learning model associated with a cluster id
+        :param cluster_id: the index of a cluster in a clustering model in the ML model family
+        :return: a SL model name, a SL model object
+        """
+
+        cl = next(iter(self.ml_family.models.values()))
+        cl_model = next(iter(cl.values()))
+
+        for key, value in cl_model.items():
+            if key is not 'CL_MODEL' and key is not 'AVG_R2':
+                if key == cluster_id:
+                    sl_model = next(iter(value.values()))
+                    return list(value.keys())[0], sl_model['SL_MODEL']
+
+        return None, None
+
+    def get_sl_models(self):
+        """
+        This returns all selected supervised learning models in the ML model family
+        :return: a dictionary for pairs of supervised learning models
+        e.g., ) {0: [SL model object], 1: [SL model object], ...}
+        0 and 1 stand for the cluster id
+        """
+
+        cl = next(iter(self.ml_family.models.values()))
+        cl_model = next(iter(cl.values()))
         result = {}
-        for c, d in clusters.items():
-            if isinstance(d, dict):
-                result[c] = d
+
+        for cluster_id, value in cl_model.items():
+            if cluster_id is not 'CL_MODEL' and cluster_id is not 'AVG_R2':
+                sl_model = next(iter(value.values()))
+                result[cluster_id] = sl_model
 
         return result
 
-    def get_high_scored_avg_r2(self):
-        _, v = next(iter(self.ml_models.items()))
-        avg_r2 = '{:.9}'.format(v['avg_r2'])
-        return avg_r2
+    def get_clustered_data_by_id(self, cluster_id):
+        """
+        This returns a clustered data associated with a cluster id
+        :param cluster_id: the index of a cluster in a clustering model in the ML model family
+        :return: X data, y data
+        """
+
+        cl = next(iter(self.ml_family.data.values()))
+        cl_data= next(iter(cl.values()))
+
+        X, y = None, None
+        for key, data_dict in cl_data.items():
+            if key == cluster_id:
+                X = data_dict['x_train']
+                y = data_dict['y_train']
+                break
+
+        return X, y

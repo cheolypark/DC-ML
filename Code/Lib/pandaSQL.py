@@ -1,5 +1,7 @@
+import pandas.io.sql as psql
 from sqlalchemy import create_engine
 import pandas as pd
+import numpy as np
 from patsy.highlevel import dmatrices
 
 class PandaSQL():
@@ -20,8 +22,9 @@ class PandaSQL():
         if where == None:
             query = ("SELECT * FROM {}.{} ".format(db, table))
         else:
-            query = ("SELECT * FROM {}.{} where {}".format(db, table, where))
+            query = ("SELECT * FROM {}.{} {}".format(db, table, where))
 
+        print('SQL: ' + query)
         df = pd.read_sql(query, con=conn)
 
         return df
@@ -29,7 +32,7 @@ class PandaSQL():
     def getXsYData(self, df, yIndex, xlist):
         modelelements = ' + '.join(xlist)
         formula = yIndex + ' ~ ' + modelelements
-        print(formula)
+        # print(formula)
 
         y, X = dmatrices(formula, data=df, return_type='dataframe')
         X = X.drop('Intercept', 1)
@@ -39,7 +42,7 @@ class PandaSQL():
     def getSelectedData(self, df, yIndex, xlist):
         modelelements = ' + '.join(xlist)
         formula = yIndex + ' ~ ' + modelelements
-        print(formula)
+        # print(formula)
 
         y, x = dmatrices(formula, data=df, return_type='dataframe')
         x = x.drop('Intercept', 1)

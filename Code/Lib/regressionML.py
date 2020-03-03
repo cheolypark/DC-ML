@@ -3,10 +3,10 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import cross_val_score
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import DotProduct, WhiteKernel
 from sklearn.metrics import r2_score
+from sklearn.metrics import mean_absolute_error
 from HML_runner import HML_runner
 from DMP_runner import DMP_runner
 import pandas as pd
@@ -14,9 +14,14 @@ import numpy as np
 import time
 import json
 
+
 class RegressionML():
-    def __init__(self):
-        pass
+    def __init__(self, metrics='R2'):
+        # Set metrics
+        if metrics == 'R2':
+            self.score = r2_score
+        elif metrics == 'MAE':
+            self.score = mean_absolute_error
 
     def show_results(self, y_predicted, y_actual=None, ML_Alg=None, cv=5):
         if y_actual is None or len(y_actual) == 0:
@@ -37,7 +42,7 @@ class RegressionML():
         #     print(f'Training Cross Validation Score({val_scores.mean()}):', val_scores)
 
         # Testing Accuracy Score
-        r2 = r2_score(y_actual, y_predicted)
+        r2 = self.score(y_actual, y_predicted)
         # if len(y_actual) > 0 and len(y_predicted) > 0:
         #     print("Testing R^2 Accuracy Score:", r2)
 
@@ -195,7 +200,7 @@ class RegressionML():
 
         # print("== BN was completed : Time {} ==============================".format(time.time()-ts))
 
-        if show == True:
+        if show == True and len(y_actual) > 1:
             return y_predicted, self.show_results(y_predicted, y_actual)
         else:
             return y_predicted, self.show_results(y_predicted, y_actual=None)

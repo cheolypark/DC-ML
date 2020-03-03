@@ -1,6 +1,7 @@
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 
+
 class SaveResults():
     def __init__(self, filename):
         self.wb = Workbook()

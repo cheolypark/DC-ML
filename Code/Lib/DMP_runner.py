@@ -6,7 +6,6 @@ import pandas as pd
 import concurrent.futures
 import time
 
-
 class DMP_runner():
     def __init__(self, output):
         self.output = output
