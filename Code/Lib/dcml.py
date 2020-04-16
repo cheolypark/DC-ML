@@ -88,6 +88,66 @@ class MLModelFamily:
     def get_SL_model_r2(self, cl_alg, parameters, cur_cluster, prediction_alg):
         return self.models[cl_alg][parameters][cur_cluster][prediction_alg]['R2']
 
+    def get_sl_models(self):
+        """
+        This returns all selected supervised learning models in the ML model family
+        :return: a dictionary for pairs of supervised learning models
+        e.g., ) {0: [SL model object], 1: [SL model object], ...}
+        0 and 1 stand for the cluster id
+        """
+
+        cl = next(iter(self.models.values()))
+        cl_model = next(iter(cl.values()))
+        result = {}
+
+        for cluster_id, value in cl_model.items():
+            if cluster_id is not 'CL_MODEL' and cluster_id is not 'AVG_R2':
+                sl_model = next(iter(value.values()))
+                result[cluster_id] = sl_model
+
+        return result
+
+    def get_sl_model(self, cluster_id):
+        """
+        This returns a selected supervised learning model associated with a cluster id
+        :param cluster_id: the index of a cluster in a clustering model in the ML model family
+        :return: a SL model name, a SL model object
+        """
+
+        cl = next(iter(self.models.values()))
+        cl_model = next(iter(cl.values()))
+
+        for key, value in cl_model.items():
+            if key is not 'CL_MODEL' and key is not 'AVG_R2':
+                if key == cluster_id:
+                    sl_model = next(iter(value.values()))
+                    return list(value.keys())[0], sl_model['SL_MODEL']
+
+        return None, None
+
+    def get_cl_model(self):
+        """
+        This returns the clustering algorithm class
+        """
+
+        cl = next(iter(self.models.values()))
+        cl_model = next(iter(cl.values()))
+        if isinstance(cl_model['CL_MODEL'], Clustering_Alg):
+            return cl_model['CL_MODEL']
+        else:
+            return None
+
+    def get_clustering_alg(self):
+        """
+        This returns a selected clustering algorithm
+        """
+
+        cl_model = self.get_cl_model()
+        if cl_model is not None:
+            return cl_model.get_selected_clustering_alg()
+        else:
+            return None
+
     def get_CL_models(self, cl_alg, parameters):
         cl_models = {}
         for key, value in self.models[cl_alg][parameters].items():
@@ -102,6 +162,29 @@ class MLModelFamily:
     def get_high_CL_model(self, cl_alg):
         return self.models[cl_alg]['HIGH_CL']
 
+    def get_clustered_data_by_id(self, cluster_id):
+        """
+        This returns a clustered data associated with a cluster id
+        :param cluster_id: the index of a cluster in a clustering model in the ML model family
+        :return: X data, y data
+        """
+
+        cl = next(iter(self.data.values()))
+        cl_data= next(iter(cl.values()))
+
+        X, y = None, None
+        for key, data_dict in cl_data.items():
+            if key == cluster_id:
+                X = data_dict['x_train']
+                y = data_dict['y_train']
+                break
+
+        return X, y
+
+    def get_clustered_all_data_by_id(self, cluster_id):
+        X, y = self.get_clustered_data_by_id(cluster_id)
+        data = pd.concat((X, y), axis=1)
+        return data
 
 class DataClusterBasedMachineLearning:
     """
@@ -255,7 +338,7 @@ class DataClusterBasedMachineLearning:
         for prediction_alg in self.prediction_algs:
             r2 = self.ml_family.get_SL_model_r2(cl_alg, parameters, cur_cluster, prediction_alg)
 
-            print(f'Check for {cl_alg}.{parameters}.{cur_cluster}.{prediction_alg} = {r2}')
+            print(f'Check R2 for {cl_alg}.{parameters}.{cur_cluster}.{prediction_alg} = {r2}')
             r2_high = min_or_max(r2_high, r2)
             if r2 is r2_high:
                 if alg_high is not None:
@@ -438,10 +521,10 @@ class DataClusterBasedMachineLearning:
 
         #############################################################################
         # 4. perform ML **again** using all data of both training and validation data sets
-        sl_models = self.get_sl_models()
+        sl_models = self.ml_family.get_sl_models()
         for cluster_id, sl in sl_models.items():
             # print(cluster_id, sl)
-            x_train, y_train = self.get_clustered_data_by_id(cluster_id)
+            x_train, y_train = self.ml_family.get_clustered_data_by_id(cluster_id)
             # self.data[cl_alg][parameters]
 
             # temporary name for CBN
@@ -458,11 +541,11 @@ class DataClusterBasedMachineLearning:
             # Replace the old with the new SL model
             sl['SL_MODEL'] = model
 
-        print('***An ML model family was selected***')
+        print('!!! An ML model family was selected !!!')
 
         return self.ml_family
 
-    def perform_prediction(self, x_test, y_test, metrics='MAE'):
+    def perform_prediction(self, x_test, y_test, metrics='R2'):
         """
         This performs prediction given a test data set
         :param x_test: test data for X variables
@@ -472,100 +555,33 @@ class DataClusterBasedMachineLearning:
 
         self.set_metrics(metrics)
 
-        cl_model = self.get_cl_model()
+        cl_alg = self.ml_family.get_clustering_alg()
         y_label = []
 
         # None-cl_model means that the Non-Cluster model was selected
-        if cl_model is not None:
+        if cl_alg is not None:
             # Get data using clustering variables
             data_for_clustering = x_test[self.clustering_variables]
 
+            cl_model = self.ml_family.get_cl_model()
             # normalize dataset for easier parameter selection
-            x_test_norm = StandardScaler().fit_transform(data_for_clustering)
-            y_label = cl_model.predict(x_test_norm)
+            x_test_norm = cl_model.data_scaler(data_for_clustering)
+            # predict label using the normalized data
+            y_label = cl_alg.predict(x_test_norm)
 
             index = 0
             yPredicted = []
 
             for cluster_id in y_label:
-                ml_name, ml_model = self.get_sl_model(cluster_id)
-                yPre, score = self.do_prediction(ml_name, ml_model, x_test.iloc[[index]], y_test.iloc[[index]], cbn_name = datetime.now().strftime("%m_%d_%Y %H_%M_%S"))
+                ml_name, ml_model = self.ml_family.get_sl_model(cluster_id)
+                yPre, r2 = self.do_prediction(ml_name, ml_model, x_test.iloc[[index]], y_test.iloc[[index]], cbn_name = datetime.now().strftime("%m_%d_%Y %H_%M_%S"))
                 yPredicted.append(yPre)
                 index += 1
 
             yPredicted2 = pd.DataFrame(yPredicted)
-            score = self.score(y_test, yPredicted2)
+            r2 = self.score(y_test, yPredicted2)
         else:
-            ml_name, ml_model = self.get_sl_model(0)
-            yPredicted, score = self.do_prediction(ml_name, ml_model, x_test, y_test, cbn_name=datetime.now().strftime("%m_%d_%Y %H_%M_%S"))
+            ml_name, ml_model = self.ml_family.get_sl_model(0)
+            yPredicted, r2 = self.do_prediction(ml_name, ml_model, x_test, y_test, cbn_name=datetime.now().strftime("%m_%d_%Y %H_%M_%S"))
 
-        return yPredicted, score, y_label
-
-    def get_cl_model(self):
-        """
-        This returns a selected clustering model
-        :return: a selected clustering model object
-        """
-
-        cl = next(iter(self.ml_family.models.values()))
-        cl_model = next(iter(cl.values()))
-        if isinstance(cl_model['CL_MODEL'], Clustering_Alg):
-            return cl_model['CL_MODEL'].get_clustering_alg()
-        else:
-            return None
-
-    def get_sl_model(self, cluster_id):
-        """
-        This returns a selected supervised learning model associated with a cluster id
-        :param cluster_id: the index of a cluster in a clustering model in the ML model family
-        :return: a SL model name, a SL model object
-        """
-
-        cl = next(iter(self.ml_family.models.values()))
-        cl_model = next(iter(cl.values()))
-
-        for key, value in cl_model.items():
-            if key is not 'CL_MODEL' and key is not 'AVG_R2':
-                if key == cluster_id:
-                    sl_model = next(iter(value.values()))
-                    return list(value.keys())[0], sl_model['SL_MODEL']
-
-        return None, None
-
-    def get_sl_models(self):
-        """
-        This returns all selected supervised learning models in the ML model family
-        :return: a dictionary for pairs of supervised learning models
-        e.g., ) {0: [SL model object], 1: [SL model object], ...}
-        0 and 1 stand for the cluster id
-        """
-
-        cl = next(iter(self.ml_family.models.values()))
-        cl_model = next(iter(cl.values()))
-        result = {}
-
-        for cluster_id, value in cl_model.items():
-            if cluster_id is not 'CL_MODEL' and cluster_id is not 'AVG_R2':
-                sl_model = next(iter(value.values()))
-                result[cluster_id] = sl_model
-
-        return result
-
-    def get_clustered_data_by_id(self, cluster_id):
-        """
-        This returns a clustered data associated with a cluster id
-        :param cluster_id: the index of a cluster in a clustering model in the ML model family
-        :return: X data, y data
-        """
-
-        cl = next(iter(self.ml_family.data.values()))
-        cl_data= next(iter(cl.values()))
-
-        X, y = None, None
-        for key, data_dict in cl_data.items():
-            if key == cluster_id:
-                X = data_dict['x_train']
-                y = data_dict['y_train']
-                break
-
-        return X, y
+        return yPredicted, r2, y_label

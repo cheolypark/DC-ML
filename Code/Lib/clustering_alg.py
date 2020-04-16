@@ -17,6 +17,15 @@ class Clustering_Alg:
         self.selected_clustering_algorithms = []
         self.clustering_algorithms = {}
         self.clustering_variables = []
+        self.scaler = StandardScaler()
+
+    def data_scaler(self, data):
+        temp_scaler = StandardScaler()
+        temp_scaler.mean_ = self.scaler.mean_
+        temp_scaler.var_ = self.scaler.var_
+        temp_scaler.n_samples_seen_ = self.scaler.n_samples_seen_
+        temp_scaler.scale_ = self.scaler.scale_
+        return temp_scaler.transform(data)
 
     def set_algs(self, algs):
         """
@@ -80,7 +89,7 @@ class Clustering_Alg:
                              'min_cluster_size': 0.1,
                              'bandwidth':bandwidth}
 
-    def get_clustering_alg(self):
+    def get_selected_clustering_alg(self):
         return self.clustering_algorithms[self.selected_clustering_algorithms[0]]
 
     def get_clustered_data(self, alg):
@@ -171,7 +180,9 @@ class Clustering_Alg:
             X, y = dataset
 
             # normalize dataset for easier parameter selection
-            X = StandardScaler().fit_transform(X)
+            X = self.scaler.fit_transform(X)
+
+            print(f'mean{self.scaler.mean_}, var{self.scaler.var_}, n_samples[{self.scaler.n_samples_seen_}], scale[{self.scaler.scale_}]')
 
             # estimate bandwidth for mean shift
             bandwidth = cluster.estimate_bandwidth(X, quantile=params['quantile'])
